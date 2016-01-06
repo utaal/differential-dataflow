@@ -15,9 +15,25 @@ pub use self::iterate::IterateExt;
 pub use self::join::Join;
 pub use self::threshold::Threshold;
 
+pub use self::innermap::InnerMap;
+pub use self::innerfilter::InnerFilter;
+pub use self::innerenterleave::InnerEnter;
+pub use self::innerenterleave::InnerLeave;
+pub use self::innerconcat::InnerConcat;
+pub use self::innerinspect::InnerInspect;
+pub use self::innerprobe::InnerProbe;
+
 pub mod threshold;
 pub mod group;
 pub mod cogroup;
 pub mod consolidate;
 pub mod iterate;
 pub mod join;
+
+pub mod innermap;
+pub mod innerfilter;
+pub mod innerenterleave;
+pub mod innerconcat;
+pub mod innerinspect;
+pub mod innerprobe;
+

@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::ops::DerefMut;
 
 use ::{Data, Collection};
+use ::operators::InnerMap;
 use timely::dataflow::Scope;
 use timely::dataflow::operators::{Map, Binary};
 use timely::dataflow::channels::pact::Exchange;

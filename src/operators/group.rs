@@ -39,6 +39,7 @@ use std::ops::DerefMut;
 use itertools::Itertools;
 
 use ::{Data, Collection, Delta};
+use ::operators::InnerMap;
 use timely::dataflow::*;
 use timely::dataflow::operators::{Map, Unary};
 use timely::dataflow::channels::pact::Exchange;

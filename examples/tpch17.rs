@@ -20,6 +20,8 @@ use timely::dataflow::channels::pact::Pipeline;
 use differential_dataflow::Collection;
 use differential_dataflow::operators::group::GroupBy;
 use differential_dataflow::operators::join::JoinBy;
+use differential_dataflow::operators::innermap::InnerMap;
+use differential_dataflow::operators::innerfilter::InnerFilter;
 
 fn main() {
 
