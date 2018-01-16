@@ -23,6 +23,7 @@ byteorder="0.4.2"
 itertools="^0.6"
 
 [dependencies]
+memmap = "0.6.2"
 abomonation = { git = "https://github.com/frankmcsherry/abomonation" }
 abomonation_derive = { git = "https://github.com/mystor/abomonation_derive" }
 timely_sort="0.1.6"

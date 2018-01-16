@@ -386,15 +386,37 @@ pub mod abomonated_blanket_impls {
 
 	extern crate abomonation;
 
+	use std::ops::DerefMut;
+
+	use memmap::MmapMut;
+
 	use abomonation::{Abomonation, measure};
 	use abomonation::abomonated::Abomonated;
 
 	use super::{Batch, BatchReader, Batcher, Builder, Merger, Cursor, Description};
 
-	impl<K, V, T, R, B: BatchReader<K,V,T,R>+Abomonation> BatchReader<K,V,T,R> for Abomonated<B, Vec<u8>> {
+	/// Methods to size and populate a byte slice.
+	pub trait SizedDerefMut : DerefMut<Target=[u8]> {
+		/// Allocate a new instance with a supplied capacity.
+		fn with_size(size: usize) -> Self;
+	}
+
+	impl SizedDerefMut for Vec<u8> {
+		fn with_size(size: usize) -> Self {
+			Vec::with_capacity(size)
+		}
+	}
+
+	impl SizedDerefMut for MmapMut {
+		fn with_size(size: usize) -> Self {
+			MmapMut::map_anon(size).unwrap()
+		}
+	}
+
+	impl<K, V, T, R, B: BatchReader<K,V,T,R>+Abomonation, S: SizedDerefMut> BatchReader<K,V,T,R> for Abomonated<B, S> {
 
 		/// The type used to enumerate the batch's contents.
-		type Cursor = AbomonatedBatchCursor<K, V, T, R, B>;
+		type Cursor = AbomonatedBatchCursor<K, V, T, R, B, S>;
 		/// Acquires a cursor to the batch's contents.
 		fn cursor(&self) -> Self::Cursor {
 			AbomonatedBatchCursor::new((&**self).cursor())
@@ -407,12 +429,12 @@ pub mod abomonated_blanket_impls {
 	}
 
 	/// Wrapper to provide cursor to nested scope.
-	pub struct AbomonatedBatchCursor<K, V, T, R, B: BatchReader<K, V, T, R>> {
-	    phantom: ::std::marker::PhantomData<(K, V, T, R)>,
+	pub struct AbomonatedBatchCursor<K, V, T, R, B: BatchReader<K, V, T, R>, S: SizedDerefMut> {
+	    phantom: ::std::marker::PhantomData<(K, V, T, R, S)>,
 	    cursor: B::Cursor,
 	}
 
-	impl<K, V, T, R, B: BatchReader<K, V, T, R>> AbomonatedBatchCursor<K, V, T, R, B> {
+	impl<K, V, T, R, B: BatchReader<K, V, T, R>, S: SizedDerefMut> AbomonatedBatchCursor<K, V, T, R, B, S> {
 	    fn new(cursor: B::Cursor) -> Self {
 	        AbomonatedBatchCursor {
 	            cursor: cursor,
@@ -421,9 +443,9 @@ pub mod abomonated_blanket_impls {
 	    }
 	}
 
-	impl<K, V, T, R, B: BatchReader<K, V, T, R>+Abomonation> Cursor<K, V, T, R> for AbomonatedBatchCursor<K, V, T, R, B> {
+	impl<K, V, T, R, B: BatchReader<K, V, T, R>+Abomonation, S: SizedDerefMut> Cursor<K, V, T, R> for AbomonatedBatchCursor<K, V, T, R, B, S> {
 
-	    type Storage = Abomonated<B, Vec<u8>>;
+	    type Storage = Abomonated<B, S>;
 
 	    #[inline(always)] fn key_valid(&self, storage: &Self::Storage) -> bool { self.cursor.key_valid(storage) }
 	    #[inline(always)] fn val_valid(&self, storage: &Self::Storage) -> bool { self.cursor.val_valid(storage) }
@@ -447,7 +469,7 @@ pub mod abomonated_blanket_impls {
 	}
 
 	/// An immutable collection of updates.
-	impl<K,V,T,R,B: Batch<K,V,T,R>+Abomonation> Batch<K, V, T, R> for Abomonated<B, Vec<u8>> {
+	impl<K,V,T,R,B: Batch<K,V,T,R>+Abomonation, S: SizedDerefMut> Batch<K, V, T, R> for Abomonated<B, S> {
 
 		type Batcher = AbomonatedBatcher<K, V, T, R, B>;
 		type Builder = AbomonatedBuilder<K, V, T, R, B>;
@@ -455,8 +477,8 @@ pub mod abomonated_blanket_impls {
 
 		fn merge(&self, other: &Self) -> Self { 
 			let batch = B::merge(self, other);
-			let mut bytes = Vec::with_capacity(measure(&batch));
-			unsafe { abomonation::encode(&batch, &mut bytes).unwrap() };
+			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}
 
@@ -467,13 +489,13 @@ pub mod abomonated_blanket_impls {
 	pub struct AbomonatedBatcher<K,V,T,R,B:Batch<K,V,T,R>> { batcher: B::Batcher }
 
 	/// Functionality for collecting and batching updates.
-	impl<K,V,T,R,B:Batch<K,V,T,R>+Abomonation> Batcher<K, V, T, R, Abomonated<B,Vec<u8>>> for AbomonatedBatcher<K,V,T,R,B> {
+	impl<K,V,T,R,B:Batch<K,V,T,R>+Abomonation, S:SizedDerefMut> Batcher<K, V, T, R, Abomonated<B,S>> for AbomonatedBatcher<K,V,T,R,B> {
 		fn new() -> Self { AbomonatedBatcher { batcher: <B::Batcher as Batcher<K,V,T,R,B>>::new() } }
 		fn push_batch(&mut self, batch: &mut Vec<((K, V), T, R)>) { self.batcher.push_batch(batch) }
-		fn seal(&mut self, upper: &[T]) -> Abomonated<B, Vec<u8>> { 
+		fn seal(&mut self, upper: &[T]) -> Abomonated<B, S> { 
 			let batch = self.batcher.seal(upper);
-			let mut bytes = Vec::with_capacity(measure(&batch));
-			unsafe { abomonation::encode(&batch, &mut bytes).unwrap() };
+			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}
 		fn frontier(&mut self) -> &[T] { self.batcher.frontier() }
@@ -483,14 +505,14 @@ pub mod abomonated_blanket_impls {
 	pub struct AbomonatedBuilder<K,V,T,R,B:Batch<K,V,T,R>> { builder: B::Builder }
 
 	/// Functionality for building batches from ordered update sequences.
-	impl<K,V,T,R,B:Batch<K,V,T,R>+Abomonation> Builder<K, V, T, R, Abomonated<B,Vec<u8>>> for AbomonatedBuilder<K,V,T,R,B> {
+	impl<K,V,T,R,B:Batch<K,V,T,R>+Abomonation,S:SizedDerefMut> Builder<K, V, T, R, Abomonated<B,S>> for AbomonatedBuilder<K,V,T,R,B> {
 		fn new() -> Self { AbomonatedBuilder { builder: <B::Builder as Builder<K,V,T,R,B>>::new() } }
 		fn with_capacity(cap: usize) -> Self { AbomonatedBuilder { builder: <B::Builder as Builder<K,V,T,R,B>>::with_capacity(cap) } }
 		fn push(&mut self, element: (K, V, T, R)) { self.builder.push(element) }
-		fn done(self, lower: &[T], upper: &[T], since: &[T]) -> Abomonated<B, Vec<u8>> { 
+		fn done(self, lower: &[T], upper: &[T], since: &[T]) -> Abomonated<B, S> { 
 			let batch = self.builder.done(lower, upper, since);
-			let mut bytes = Vec::with_capacity(measure(&batch));
-			unsafe { abomonation::encode(&batch, &mut bytes).unwrap() };
+			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}
 	}
@@ -499,14 +521,14 @@ pub mod abomonated_blanket_impls {
 	pub struct AbomonatedMerger<K,V,T,R,B:Batch<K,V,T,R>> { merger: B::Merger }
 
 	/// Represents a merge in progress.
-	impl<K,V,T,R,B:Batch<K,V,T,R>+Abomonation> Merger<K, V, T, R, Abomonated<B,Vec<u8>>> for AbomonatedMerger<K,V,T,R,B> {
-		fn work(&mut self, source1: &Abomonated<B,Vec<u8>>, source2: &Abomonated<B,Vec<u8>>, frontier: &Option<Vec<T>>, fuel: &mut usize) { 
+	impl<K,V,T,R,B:Batch<K,V,T,R>+Abomonation,S:SizedDerefMut> Merger<K, V, T, R, Abomonated<B,S>> for AbomonatedMerger<K,V,T,R,B> {
+		fn work(&mut self, source1: &Abomonated<B,S>, source2: &Abomonated<B,S>, frontier: &Option<Vec<T>>, fuel: &mut usize) { 
 			self.merger.work(source1, source2, frontier, fuel) 
 		}
-		fn done(self) -> Abomonated<B, Vec<u8>> { 
+		fn done(self) -> Abomonated<B, S> { 
 			let batch = self.merger.done();
-			let mut bytes = Vec::with_capacity(measure(&batch));
-			unsafe { abomonation::encode(&batch, &mut bytes).unwrap() };
+			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}
 	}

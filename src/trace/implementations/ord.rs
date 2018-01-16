@@ -30,16 +30,23 @@ use super::merge_batcher::MergeBatcher;
 use abomonation::abomonated::Abomonated;
 
 /// A trace implementation using a spine of ordered lists.
-pub type OrdValSpine<K, V, T, R> = Spine<K, V, T, R, Rc<OrdValBatch<K, V, T, R>>>;
+pub type OrdValSpine<K, V, T, R> = OrdValSpineRc<K, V, T, R>;
+// pub type OrdValSpine<K, V, T, R> = OrdValSpineAbomMmap<K, V, T, R>;
 
+/// ??
+pub type OrdValSpineRc<K, V, T, R> = Spine<K, V, T, R, Rc<OrdValBatch<K, V, T, R>>>;
 /// A trace implementation using a spine of abomonated ordered lists.
-pub type OrdValSpineAbom<K, V, T, R> = Spine<K, V, T, R, Rc<Abomonated<OrdValBatch<K, V, T, R>, Vec<u8>>>>;
+pub type OrdValSpineAbomVec<K, V, T, R> = Spine<K, V, T, R, Rc<Abomonated<OrdValBatch<K, V, T, R>, Vec<u8>>>>;
+///  13$!#$!#!
+pub type OrdValSpineAbomMmap<K, V, T, R> = Spine<K, V, T, R, Rc<Abomonated<OrdValBatch<K, V, T, R>, ::memmap::MmapMut>>>;
 
 /// A trace implementation for empty values using a spine of ordered lists.
 pub type OrdKeySpine<K, T, R> = Spine<K, (), T, R, Rc<OrdKeyBatch<K, T, R>>>;
 
 /// A trace implementation for empty values using a spine of abomonated ordered lists.
-pub type OrdKeySpineAbom<K, T, R> = Spine<K, (), T, R, Rc<Abomonated<OrdKeyBatch<K, T, R>, Vec<u8>>>>;
+pub type OrdKeySpineAbomVec<K, T, R> = Spine<K, (), T, R, Rc<Abomonated<OrdKeyBatch<K, T, R>, Vec<u8>>>>;
+/// !#$!#!
+pub type OrdKeySpineAbomMmap<K, T, R> = Spine<K, (), T, R, Rc<Abomonated<OrdKeyBatch<K, T, R>, ::memmap::MmapMut>>>;
 
 
 /// An immutable collection of update tuples, from a contiguous interval of logical times.
