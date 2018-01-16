@@ -7,6 +7,7 @@ use timely::progress::Timestamp;
 use lattice::Lattice;
 use trace::{TraceReader, BatchReader, Description};
 use trace::cursor::Cursor;
+use trace::BatchIdentifier;
 
 /// Wrapper to provide trace to nested scope.
 pub struct TraceEnter<K, V, T, R, Tr, TInner> {
@@ -111,6 +112,7 @@ pub struct BatchEnter<K, V, T, R, B, TInner> {
     phantom: ::std::marker::PhantomData<(K, V, T, R)>,
     batch: B,
     description: Description<TInner>,
+    identifier: BatchIdentifier,
 }
 
 impl<K, V, T, R, B: Clone, TInner: Clone> Clone for BatchEnter<K, V, T, R, B, TInner> {
@@ -119,6 +121,7 @@ impl<K, V, T, R, B: Clone, TInner: Clone> Clone for BatchEnter<K, V, T, R, B, TI
             phantom: ::std::marker::PhantomData,
             batch: self.batch.clone(),
             description: self.description.clone(),
+            identifier: self.identifier.clone(),
         }
     }
 }
@@ -136,6 +139,7 @@ where
     }
     fn len(&self) -> usize { self.batch.len() }
     fn description(&self) -> &Description<TInner> { &self.description }
+    fn identifier(&self) -> &BatchIdentifier { &self.identifier }
 }
 
 impl<K, V, T, R, B, TInner> BatchEnter<K, V, T, R, B, TInner>
@@ -150,10 +154,12 @@ where
         let upper: Vec<_> = batch.description().upper().iter().map(|x| TInner::to_inner(x.clone())).collect();
         let since: Vec<_> = batch.description().since().iter().map(|x| TInner::to_inner(x.clone())).collect();
 
+        let identifier = batch.identifier().clone();
         BatchEnter {
             phantom: ::std::marker::PhantomData,
             batch: batch,
-            description: Description::new(&lower[..], &upper[..], &since[..])
+            description: Description::new(&lower[..], &upper[..], &since[..]),
+            identifier: identifier,
         }
     }
 }

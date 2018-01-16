@@ -7,7 +7,7 @@
 use timely::order::PartialOrder;
 
 /// A bounded partially ordered type supporting joins and meets.
-pub trait Lattice : PartialOrder {
+pub trait Lattice : PartialOrder+::std::fmt::Debug {
 
     /// The smallest element of the type.
     ///

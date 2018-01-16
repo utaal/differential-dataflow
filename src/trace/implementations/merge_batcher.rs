@@ -32,8 +32,19 @@ where
         }
     }
 
+    fn with_lower(lower: Vec<T>) -> Self {
+        let mut new = Self::new();
+        new.lower = lower;
+        new
+    }
+
+    fn lower(&self) -> &[T] {
+        &self.lower[..]
+    }
+
     #[inline(never)]
     fn push_batch(&mut self, batch: &mut Vec<((K,V),T,R)>) {
+        batch.retain(|&(_, ref t, _)| self.lower.iter().any(|f| f.less_equal(t)));
         self.sorter.push(batch);
     }
 
@@ -42,7 +53,9 @@ where
     // which we call `lower`, by assumption that after sealing a batcher we receive no more
     // updates with times not greater or equal to `upper`.
     #[inline(never)]
-    fn seal(&mut self, upper: &[T]) -> B {
+    fn seal(&mut self, upper: &[T], identifier: BatchIdentifier) -> B {
+        // lower <= upper
+        assert!(upper.iter().all(|u| self.lower.iter().any(|l| l.less_equal(u))));
 
         let mut builder = B::Builder::new();
 
@@ -96,7 +109,7 @@ where
             self.sorter.push(&mut buffer);
         }
 
-        let seal = builder.done(&self.lower[..], &upper[..], &self.lower[..]);
+        let seal = builder.done(&self.lower[..], &upper[..], &self.lower[..], identifier);
         self.lower = upper.to_vec();
         seal
     }
@@ -109,6 +122,7 @@ where
 
 
 use std::slice::{from_raw_parts};
+use trace::BatchIdentifier;
 
 pub struct VecQueue<T> {
     list: Vec<T>,

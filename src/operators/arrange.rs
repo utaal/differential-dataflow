@@ -17,6 +17,8 @@
 //! see ill-defined data at times for which the trace is not complete. (All current implementations
 //! commit only completed data to the trace).
 
+extern crate timely;
+
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::default::Default;
@@ -41,6 +43,7 @@ use trace::implementations::ord::OrdKeySpine as DefaultKeyTrace;
 
 use trace::wrappers::enter::{TraceEnter, BatchEnter};
 use trace::wrappers::rc::TraceBox;
+use trace::BatchIdentifier;
 
 /// A trace writer capability.
 pub struct TraceWriter<K, V, T, R, Tr>
@@ -350,7 +353,7 @@ pub struct Arranged<G: Scope, K, V, R, T> where G::Timestamp: Lattice+Ord, T: Tr
     // returns when invoked, so as to not duplicate work with multiple calls to `as_collection`.
 }
 
-impl<G: Scope, K, V, R, T> Clone for Arranged<G, K, V, R, T>
+impl<G: Scope, K, V, R, T> Clone for Arranged<G, K, V, R, T> 
 where G::Timestamp: Lattice+Ord, T: TraceReader<K, V, G::Timestamp, R>+Clone {
     fn clone(&self) -> Self {
         Arranged {
@@ -602,7 +605,7 @@ impl<G: Scope, K, V, R, T> Arranged<G, K, V, R, T> where G::Timestamp: Lattice+O
 
 /// A type that can be arranged into a trace of type `T`.
 ///
-/// This trait is implemented for appropriately typed collections and all traces that might accommodate them,
+/// This trait is implemented for appropriately typed collections and all traces that might accommodate them, 
 /// as well as by arranged data for their corresponding trace type.
 pub trait Arrange<G: Scope, K, V, R: Diff>
 where
@@ -650,7 +653,7 @@ where
             let reader = &mut reader;
             let exchange = Exchange::new(move |update: &((K,V),G::Timestamp,R)| (update.0).0.hashed().as_u64());
 
-            self.inner.unary_frontier(exchange, name, move |_capability, _info| {
+            self.inner.unary_frontier(exchange, name, move |_capability, info| {
 
                 // Attempt to acquire a logger for arrange events.
                 let logger = {
@@ -659,13 +662,53 @@ where
                     register.get::<::logging::DifferentialEvent>("differential/arrange")
                 };
 
+                let addr = self.scope().addr();
+
                 // Where we will deposit received updates, and from which we extract batches.
-                let mut batcher = <T::Batch as Batch<K,V,G::Timestamp,R>>::Batcher::new();
+                // master: let mut batcher = <T::Batch as Batch<K,V,G::Timestamp,R>>::Batcher::new();
 
                 // Capabilities for the lower envelope of updates in `batcher`.
                 let mut capabilities = Antichain::<Capability<G::Timestamp>>::new();
 
+                let trace_identifier = BatchIdentifier::new(addr.clone(), info.index());
+                let recovered_batches = T::reconstitute(trace_identifier.clone());
+
+                let (mut batcher, upper) = if let Some(b) = recovered_batches.last() {
+                    let upper = b.upper().to_vec();
+                    (<T::Batch as Batch<K,V,G::Timestamp,R>>::Batcher::with_lower(upper.clone()), Some(upper))
+                } else {
+                    (<T::Batch as Batch<K, V, G::Timestamp, R>>::Batcher::new(), None)
+                };
+
+                if let Some(u) = upper {
+                    for batch in recovered_batches.into_iter() {
+                        writer.seal(&[G::Timestamp::minimum()], Some((Default::default(), batch)));
+                    }
+                    writer.seal(&u[..], None);
+                }
+
+
                 let mut buffer = Vec::new();
+
+                // TODO: ???
+
+                // Having extracted and sent batches between each capability and the input frontier,
+                // we should downgrade all capabilities to match the batcher's lower update frontier.
+                // This may involve discarding capabilities, which is fine as any new updates arrive
+                // in messages with new capabilities.
+
+                let mut new_capabilities = Antichain::new();
+                for time in batcher.lower() {
+                    if let Some(capability) = capabilities.elements().iter().find(|c| c.time().less_equal(time)) {
+                        new_capabilities.insert(capability.delayed(time));
+                    }
+                    // else {
+                        //panic!("failed to find capability");
+                    //}
+                }
+                capabilities = new_capabilities;
+
+                // ???
 
                 let empty_trace = T::new(_info, logger);
                 let (reader_local, mut writer) = TraceAgent::new(empty_trace);
@@ -710,7 +753,34 @@ where
                             }
 
                             // Extract updates not in advance of `upper`.
-                            let batch = batcher.seal(upper.elements());
+                            let batch = batcher.seal(upper.elements(), trace_identifier);
+
+                        // ??? let mut new_upper = Antichain::new();
+                        // ??? for time1 in upper.elements() {
+                        // ???     for time2 in batcher.lower().iter() {
+                        // ???         new_upper.insert(time1.join(time2));
+                        // ???     }
+                        // ??? }
+
+                        // ??? // ! new_upper <= batcher.lower()
+                        // ??? // We assert that new_upper is >= to batcher.lower()
+                        // ??? if !batcher.lower().iter().all(|b| new_upper.less_equal(&b)) {
+                        // ???     // This should only be called if new_upper != batcher.lower()
+                        // ???     // Extract updates not in advance of `upper`.
+                        // ???     let batch = batcher.seal(new_upper.elements(), trace_identifier.clone());
+
+                        // ???     writer.seal(new_upper.elements(), Some((capability.time().clone(), batch.clone())));
+
+                        // ???     // send the batch to downstream consumers, empty or not.
+                        // ???     output.session(&capabilities.elements()[index]).give(BatchWrapper { item: batch });
+                        // ??? } else {
+                        // ???     // TODO(andreal) replace this once we have helpers for Antichain
+                        // ???     let mut batcher_sorted = batcher.lower().to_vec();
+                        // ???     batcher_sorted.sort();
+                        // ???     let mut new_upper_elements = new_upper.elements().to_vec();
+                        // ???     new_upper_elements.sort();
+                        // ???     assert_eq!(batcher_sorted, new_upper_elements);
+                        // ??? }
 
                             writer.seal(upper.elements(), Some((capability.time().clone(), batch.clone())));
 

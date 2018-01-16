@@ -24,7 +24,7 @@ impl<K, V, T: Eq, R, B: Batch<K, V, T, R>> MergeState<K, V, T, R, B> {
     fn complete(mut self, logger: &mut Option<::logging::Logger>, operator: usize, scale: usize) -> B {
         if let MergeState::Merging(ref source1, ref source2, ref frontier, ref mut in_progress) = self {
             let mut fuel = usize::max_value();
-            in_progress.work(source1, source2, frontier, &mut fuel);
+            in_progress.work(source1.base(), source2.base(), frontier, &mut fuel);
             assert!(fuel > 0);
         }
         match self {
@@ -54,12 +54,12 @@ impl<K, V, T: Eq, R, B: Batch<K, V, T, R>> MergeState<K, V, T, R, B> {
     }
     fn begin_merge(batch1: B, batch2: B, frontier: Option<Vec<T>>) -> Self {
         assert!(batch1.upper() == batch2.lower());
-        let begin_merge = <B as Batch<K, V, T, R>>::begin_merge(&batch1, &batch2);
+        let begin_merge = <B as Batch<K, V, T, R>>::begin_merge(batch1.base(), batch2.base());
         MergeState::Merging(batch1, batch2, frontier, begin_merge)
     }
     fn work(mut self, fuel: &mut usize, logger: &mut Option<::logging::Logger>, operator: usize, scale: usize) -> Self {
         if let MergeState::Merging(ref source1, ref source2, ref frontier, ref mut in_progress) = self {
-            in_progress.work(source1, source2, frontier, fuel);
+            in_progress.work(source1.base(), source2.base(), frontier, fuel);
         }
         if *fuel > 0 {
             match self {

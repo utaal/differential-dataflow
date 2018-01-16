@@ -26,6 +26,7 @@ use operators::arrange::Arranged;
 use lattice::Lattice;
 use trace::{TraceReader, BatchReader, Description};
 use trace::cursor::Cursor;
+use trace::BatchIdentifier;
 
 /// Freezes updates to an arrangement using a supplied function.
 ///
@@ -161,6 +162,7 @@ where
     }
     fn len(&self) -> usize { self.batch.len() }
     fn description(&self) -> &Description<T> { self.batch.description() }
+    fn identifier(&self) -> &BatchIdentifier { self.batch.identifier() }
 }
 
 impl<K, V, T, R, B, F> BatchFreeze<K, V, T, R, B, F>

@@ -15,6 +15,16 @@ use differential_dataflow::operators::join::JoinCore;
 use differential_dataflow::operators::Iterate;
 use differential_dataflow::operators::Consolidate;
 
+use differential_dataflow::trace::Trace;
+use differential_dataflow::trace::implementations::ord::OrdValSpineAbomMmap;
+use differential_dataflow::trace::implementations::spine::Durable;
+
+// use differential_dataflow::trace::implementations::ord::OrdValSpine;
+// use differential_dataflow::trace::{Cursor, Trace};
+// use differential_dataflow::trace::Batch;
+// use differential_dataflow::hashable::OrdWrapper;
+// use differential_dataflow::trace::TraceReader;
+
 fn main() {
 
     let nodes: u32 = std::env::args().nth(1).unwrap().parse().unwrap();
@@ -91,8 +101,7 @@ fn main() {
             })
             .probe_with(&mut probe)
             .as_collection()
-            .arrange_by_key()
-            // .arrange::<OrdValSpineAbom>()
+            .arrange::<Durable<OrdValSpineAbomMmap>>()
             .trace
         });
 

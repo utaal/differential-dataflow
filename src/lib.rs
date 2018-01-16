@@ -87,6 +87,7 @@ pub trait Data : timely::ExchangeData + Ord + Debug { }
 impl<T: timely::ExchangeData + Ord + Debug> Data for T { }
 
 extern crate fnv;
+extern crate memmap;
 extern crate timely;
 extern crate timely_sort;
 

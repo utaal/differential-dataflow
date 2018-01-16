@@ -13,15 +13,16 @@
 //! This ordering can be exploited in several cases to avoid computation when only the first few
 //! elements are required.
 
+use std::fmt::Debug;
+
 use hashable::Hashable;
 use ::{Data, Collection, Diff};
 
 use timely::order::PartialOrder;
 use timely::progress::frontier::Antichain;
 use timely::dataflow::*;
-use timely::dataflow::operators::Operator;
 use timely::dataflow::channels::pact::Pipeline;
-use timely::dataflow::operators::Capability;
+use timely::dataflow::operators::{Operator, Capability};
 
 use operators::arrange::{Arranged, ArrangeByKey, ArrangeBySelf, TraceAgent};
 use lattice::Lattice;
@@ -30,6 +31,7 @@ use trace::cursor::CursorList;
 use trace::implementations::ord::OrdValSpine as DefaultValTrace;
 use trace::implementations::ord::OrdKeySpine as DefaultKeyTrace;
 
+use trace::BatchIdentifier;
 use trace::TraceReader;
 
 /// Extension trait for the `group` differential dataflow method.
@@ -243,7 +245,7 @@ pub trait GroupArranged<G: Scope, K: Data, V: Data, R: Diff> where G::Timestamp:
             T2: Trace<K, V2, G::Timestamp, R2>+'static,
             T2::Batch: Batch<K, V2, G::Timestamp, R2>,
             L: Fn(&K, &[(&V, R)], &mut Vec<(V2, R2)>)+'static
-            ;
+            ; 
 }
 
 impl<G, K, V, R> GroupArranged<G, K, V, R> for Collection<G, (K, V), R>
@@ -268,7 +270,7 @@ where
 }
 
 impl<G: Scope, K: Data, V: Data, T1, R: Diff> GroupArranged<G, K, V, R> for Arranged<G, K, V, R, T1>
-where
+where 
     G::Timestamp: Lattice+Ord,
     T1: TraceReader<K, V, G::Timestamp, R>+Clone+'static,
     T1::Batch: BatchReader<K, V, G::Timestamp, R> {
@@ -287,6 +289,7 @@ where
         let stream = {
 
             let result_trace = &mut result_trace;
+            let addr = self.stream.scope().addr();
             self.stream.unary_frontier(Pipeline, "Group", move |_capability, operator_info| {
 
                 let logger = {
@@ -517,6 +520,7 @@ where
 
                                 // ship batch to the output, and commit to the output trace.
                                 output.session(&capabilities[index]).give(batch.clone());
+                                // TODO: batch identifier
                                 output_writer.seal(local_upper.elements(), Some((capabilities[index].time().clone(), batch)));
 
                                 lower_issued = local_upper;
@@ -608,10 +612,10 @@ pub fn consolidate_from<T: Ord+Clone, R: Diff>(vec: &mut Vec<(T, R)>, off: usize
         }
     }
     vec.truncate(cursor);
-
+    
 }
 
-trait PerKeyCompute<'a, V1, V2, T, R1, R2>
+trait PerKeyCompute<'a, V1, V2, T, R1, R2> 
 where
     V1: Ord+Clone+'a,
     V2: Ord+Clone+'a,
@@ -622,17 +626,17 @@ where
     fn new() -> Self;
     fn compute<K, C1, C2, C3, L>(
         &mut self,
-        key: &K,
-        source_cursor: (&mut C1, &'a C1::Storage),
+        key: &K, 
+        source_cursor: (&mut C1, &'a C1::Storage), 
         output_cursor: (&mut C2, &'a C2::Storage),
         batch_cursor: (&mut C3, &'a C3::Storage),
-        times: &mut Vec<T>,
-        logic: &L,
+        times: &mut Vec<T>, 
+        logic: &L, 
         upper_limit: &Antichain<T>,
         outputs: &mut [(T, Vec<(V2, T, R2)>)],
         new_interesting: &mut Vec<T>) -> (usize, usize)
     where
-        K: Eq+Clone,
+        K: Eq+Clone+Debug,
         C1: Cursor<K, V1, T, R1>,
         C2: Cursor<K, V2, T, R2>,
         C3: Cursor<K, V1, T, R1>,
@@ -651,9 +655,9 @@ mod history_replay {
 
     use super::{PerKeyCompute, consolidate, sort_dedup};
 
-    /// The `HistoryReplayer` is a compute strategy based on moving through existing inputs, interesting times, etc in
+    /// The `HistoryReplayer` is a compute strategy based on moving through existing inputs, interesting times, etc in 
     /// time order, maintaining consolidated representations of updates with respect to future interesting times.
-    pub struct HistoryReplayer<'a, V1, V2, T, R1, R2>
+    pub struct HistoryReplayer<'a, V1, V2, T, R1, R2> 
     where
         V1: Ord+Clone+'a,
         V2: Ord+Clone+'a,
@@ -673,7 +677,7 @@ mod history_replay {
         temporary: Vec<T>,
     }
 
-    impl<'a, V1, V2, T, R1, R2> PerKeyCompute<'a, V1, V2, T, R1, R2> for HistoryReplayer<'a, V1, V2, T, R1, R2>
+    impl<'a, V1, V2, T, R1, R2> PerKeyCompute<'a, V1, V2, T, R1, R2> for HistoryReplayer<'a, V1, V2, T, R1, R2> 
     where
         V1: Ord+Clone,
         V2: Ord+Clone,
@@ -682,7 +686,7 @@ mod history_replay {
         R2: Diff,
     {
         fn new() -> Self {
-            HistoryReplayer {
+            HistoryReplayer { 
                 batch_history: ValueHistory::new(),
                 input_history: ValueHistory::new(),
                 output_history: ValueHistory::new(),
@@ -698,17 +702,17 @@ mod history_replay {
         #[inline(never)]
         fn compute<K, C1, C2, C3, L>(
             &mut self,
-            key: &K,
-            (source_cursor, source_storage): (&mut C1, &'a C1::Storage),
+            key: &K, 
+            (source_cursor, source_storage): (&mut C1, &'a C1::Storage), 
             (output_cursor, output_storage): (&mut C2, &'a C2::Storage),
             (batch_cursor, batch_storage): (&mut C3, &'a C3::Storage),
-            times: &mut Vec<T>,
-            logic: &L,
+            times: &mut Vec<T>, 
+            logic: &L, 
             upper_limit: &Antichain<T>,
             outputs: &mut [(T, Vec<(V2, T, R2)>)],
             new_interesting: &mut Vec<T>) -> (usize, usize)
         where
-            K: Eq+Clone,
+            K: Eq+Clone+Debug,
             C1: Cursor<K, V1, T, R1>,
             C2: Cursor<K, V2, T, R2>,
             C3: Cursor<K, V1, T, R1>,
@@ -742,7 +746,7 @@ mod history_replay {
             if self.meets.len() > 0 { meet = meet.meet(&self.meets[0]); }
             if let Some(time) = batch_replay.meet() { meet = meet.meet(&time); }
 
-            // Having determined the meet, we can load the input and output histories, where we
+            // Having determined the meet, we can load the input and output histories, where we 
             // advance all times by joining them with `meet`. The resulting times are more compact
             // and guaranteed to accumulate identically for times greater or equal to `meet`.
 
@@ -754,7 +758,7 @@ mod history_replay {
             self.times_current.clear();
             self.output_produced.clear();
 
-            // The frontier of times we may still consider.
+            // The frontier of times we may still consider. 
             // Derived from frontiers of our update histories, supplied times, and synthetic times.
 
             let mut times_slice = &times[..];
@@ -790,7 +794,7 @@ mod history_replay {
                 // advance both `synth_times` and `times_slice`, marking this time interesting if in either.
                 while self.synth_times.last() == Some(&next_time) {
                     // We don't know enough about `next_time` to avoid putting it in to `times_current`.
-                    // TODO: If we knew that the time derived from a canceled batch update, we could remove the time.
+                    // TODO: If we knew that the time derived from a canceled batch update, we could remove the time. 
                     self.times_current.push(self.synth_times.pop().expect("failed to pop from synth_times")); // <-- TODO: this could be a min-heap.
                     interesting = true;
                 }
@@ -805,12 +809,12 @@ mod history_replay {
                 // Times could also be interesting if an interesting time is less than them, as they would join
                 // and become the time itself. They may not equal the current time because whatever frontier we
                 // are tracking may not have advanced far enough.
-                // TODO: `batch_history` may or may not be super compact at this point, and so this check might
+                // TODO: `batch_history` may or may not be super compact at this point, and so this check might 
                 //       yield false positives if not sufficiently compact. Maybe we should into this and see.
                 interesting = interesting || batch_replay.buffer().iter().any(|&((_, ref t),_)| t.less_equal(&next_time));
                 interesting = interesting || self.times_current.iter().any(|t| t.less_equal(&next_time));
 
-                // We should only process times that are not in advance of `upper_limit`.
+                // We should only process times that are not in advance of `upper_limit`. 
                 //
                 // We have no particular guarantee that known times will not be in advance of `upper_limit`.
                 // We may have the guarantee that synthetic times will not be, as we test against the limit
@@ -818,9 +822,9 @@ mod history_replay {
                 if !upper_limit.less_equal(&next_time) {
 
                     // We should re-evaluate the computation if this is an interesting time.
-                    // If the time is uninteresting (and our logic is sound) it is not possible for there to be
+                    // If the time is uninteresting (and our logic is sound) it is not possible for there to be 
                     // output produced. This sounds like a good test to have for debug builds!
-                    if interesting {
+                    if interesting { 
 
                         compute_counter += 1;
 
@@ -849,7 +853,7 @@ mod history_replay {
                         if self.input_buffer.len() > 0 {
                             logic(key, &self.input_buffer[..], &mut self.output_buffer);
                             self.input_buffer.clear();
-                        }
+                        }            
 
                         output_replay.advance_buffer_by(&meet);
                         for &((ref value, ref time), diff) in output_replay.buffer().iter() {
@@ -870,20 +874,20 @@ mod history_replay {
                         }
 
                         // Having subtracted output updates from user output, consolidate the results to determine
-                        // if there is anything worth reporting. Note: this also orders the results by value, so
-                        // that could make the above merging plan even easier.
+                        // if there is anything worth reporting. Note: this also orders the results by value, so 
+                        // that could make the above merging plan even easier. 
                         consolidate(&mut self.output_buffer);
 
-                        // Stash produced updates into both capability-indexed buffers and `output_produced`.
-                        // The two locations are important, in that we will compact `output_produced` as we move
+                        // Stash produced updates into both capability-indexed buffers and `output_produced`. 
+                        // The two locations are important, in that we will compact `output_produced` as we move 
                         // through times, but we cannot compact the output buffers because we need their actual
                         // times.
                         if self.output_buffer.len() > 0 {
 
                             output_counter += 1;
 
-                            // We *should* be able to find a capability for `next_time`. Any thing else would
-                            // indicate a logical error somewhere along the way; either we release a capability
+                            // We *should* be able to find a capability for `next_time`. Any thing else would 
+                            // indicate a logical error somewhere along the way; either we release a capability 
                             // we should have kept, or we have computed the output incorrectly (or both!)
                             let idx = outputs.iter().rev().position(|&(ref time, _)| time.less_equal(&next_time));
                             let idx = outputs.len() - idx.expect("failed to find index") - 1;
@@ -893,7 +897,7 @@ mod history_replay {
                             }
 
                             // Advance times in `self.output_produced` and consolidate the representation.
-                            // NOTE: We only do this when we add records; it could be that there are situations
+                            // NOTE: We only do this when we add records; it could be that there are situations 
                             //       where we want to consolidate even without changes (because an initially
                             //       large collection can now be collapsed).
                             for entry in &mut self.output_produced {
@@ -911,7 +915,7 @@ mod history_replay {
                     // skip `self.synth_times` as we haven't gotten to them yet, but we will and they will be
                     // joined against everything.
 
-                    // Any time, even uninteresting times, must be joined with the current accumulation of
+                    // Any time, even uninteresting times, must be joined with the current accumulation of 
                     // batch times as well as the current accumulation of `times_current`.
                     for &((_, ref time), _) in batch_replay.buffer().iter() {
                         if !time.less_equal(&next_time) {
@@ -943,10 +947,10 @@ mod history_replay {
                         self.synth_times.dedup();
                     }
                 }
-                else {
+                else {  
 
                     if interesting {
-                        // We cannot process `next_time` now, and must delay it.
+                        // We cannot process `next_time` now, and must delay it. 
                         //
                         // I think we are probably only here because of an uninteresting time declared interesting,
                         // as initial interesting times are filtered to be in interval, and synthetic times are also
