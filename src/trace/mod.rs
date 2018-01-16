@@ -409,7 +409,12 @@ pub mod abomonated_blanket_impls {
 
 	impl SizedDerefMut for MmapMut {
 		fn allocate_for<K,V,T,R,B: BatchReader<K,V,T,R>+Abomonation>(batch: &B) -> Self {
-			MmapMut::map_anon(measure(batch)).unwrap()
+			let time = ::std::time::Instant::now();
+			let filename = format!("durability/{:?}", time);
+			let file = ::std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(filename).expect("failed to open file");
+			file.set_len(measure(batch) as u64).expect("failed to set length");
+
+			unsafe { ::memmap::MmapOptions::new().map_copy(&file).expect("failed to map copy") }
 		}
 	}
 
