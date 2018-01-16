@@ -15,7 +15,7 @@ use differential_dataflow::operators::Iterate;
 use differential_dataflow::operators::Consolidate;
 
 use differential_dataflow::trace::Trace;
-use differential_dataflow::trace::implementations::ord::OrdValSpineAbom;
+use differential_dataflow::trace::implementations::ord::OrdValSpineAbomVec;
 
 // use differential_dataflow::trace::implementations::ord::OrdValSpine;
 // use differential_dataflow::trace::{Cursor, Trace};
@@ -100,7 +100,7 @@ fn main() {
             .probe_with(&mut probe)
             .as_collection()
             // .arrange_by_key()
-            .arrange(OrdValSpineAbom::new())
+            .arrange(OrdValSpineAbomVec::new())
             .trace
         });
 

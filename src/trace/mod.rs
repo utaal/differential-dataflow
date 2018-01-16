@@ -398,18 +398,18 @@ pub mod abomonated_blanket_impls {
 	/// Methods to size and populate a byte slice.
 	pub trait SizedDerefMut : DerefMut<Target=[u8]> {
 		/// Allocate a new instance with a supplied capacity.
-		fn with_size(size: usize) -> Self;
+		fn allocate_for<K,V,T,R,B: BatchReader<K,V,T,R>+Abomonation>(batch: &B) -> Self;
 	}
 
 	impl SizedDerefMut for Vec<u8> {
-		fn with_size(size: usize) -> Self {
-			Vec::with_capacity(size)
+		fn allocate_for<K,V,T,R,B: BatchReader<K,V,T,R>+Abomonation>(batch: &B) -> Self {
+			Vec::with_capacity(measure(batch))
 		}
 	}
 
 	impl SizedDerefMut for MmapMut {
-		fn with_size(size: usize) -> Self {
-			MmapMut::map_anon(size).unwrap()
+		fn allocate_for<K,V,T,R,B: BatchReader<K,V,T,R>+Abomonation>(batch: &B) -> Self {
+			MmapMut::map_anon(measure(batch)).unwrap()
 		}
 	}
 
@@ -477,7 +477,7 @@ pub mod abomonated_blanket_impls {
 
 		fn merge(&self, other: &Self) -> Self { 
 			let batch = B::merge(self, other);
-			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			let mut bytes = S::allocate_for(&batch);//Vec::with_capacity(measure(&batch));
 			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}
@@ -494,7 +494,7 @@ pub mod abomonated_blanket_impls {
 		fn push_batch(&mut self, batch: &mut Vec<((K, V), T, R)>) { self.batcher.push_batch(batch) }
 		fn seal(&mut self, upper: &[T]) -> Abomonated<B, S> { 
 			let batch = self.batcher.seal(upper);
-			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			let mut bytes = S::allocate_for(&batch);//Vec::with_capacity(measure(&batch));
 			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}
@@ -511,7 +511,7 @@ pub mod abomonated_blanket_impls {
 		fn push(&mut self, element: (K, V, T, R)) { self.builder.push(element) }
 		fn done(self, lower: &[T], upper: &[T], since: &[T]) -> Abomonated<B, S> { 
 			let batch = self.builder.done(lower, upper, since);
-			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			let mut bytes = S::allocate_for(&batch);//Vec::with_capacity(measure(&batch));
 			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}
@@ -527,7 +527,7 @@ pub mod abomonated_blanket_impls {
 		}
 		fn done(self) -> Abomonated<B, S> { 
 			let batch = self.merger.done();
-			let mut bytes = S::with_size(measure(&batch));//Vec::with_capacity(measure(&batch));
+			let mut bytes = S::allocate_for(&batch);//Vec::with_capacity(measure(&batch));
 			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
 		}

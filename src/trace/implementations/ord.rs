@@ -31,6 +31,7 @@ use abomonation::abomonated::Abomonated;
 
 /// A trace implementation using a spine of ordered lists.
 pub type OrdValSpine<K, V, T, R> = OrdValSpineRc<K, V, T, R>;
+// pub type OrdValSpine<K, V, T, R> = OrdValSpineAbomVec<K, V, T, R>;
 // pub type OrdValSpine<K, V, T, R> = OrdValSpineAbomMmap<K, V, T, R>;
 
 /// ??
