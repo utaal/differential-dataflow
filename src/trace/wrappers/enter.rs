@@ -5,6 +5,7 @@ use timely::progress::nested::product::Product;
 use lattice::Lattice;
 use trace::{TraceReader, BatchReader, Description};
 use trace::cursor::Cursor;
+use trace::BatchIdentifier;
 
 /// Wrapper to provide trace to nested scope.
 pub struct TraceEnter<K, V, T, R, Tr, TInner> where Tr: TraceReader<K, V, T, R>, T: Lattice+Clone+'static {
@@ -103,6 +104,7 @@ pub struct BatchEnter<K, V, T, R, B, TInner> {
     phantom: ::std::marker::PhantomData<(K, V, R)>,
     batch: B,
     description: Description<Product<T, TInner>>,
+    identifier: BatchIdentifier,
 }
 
 impl<K, V, T: Clone, R, B: Clone, TInner: Clone> Clone for BatchEnter<K, V, T, R, B, TInner> {
@@ -111,6 +113,7 @@ impl<K, V, T: Clone, R, B: Clone, TInner: Clone> Clone for BatchEnter<K, V, T, R
             phantom: ::std::marker::PhantomData,
             batch: self.batch.clone(),
             description: self.description.clone(),
+            identifier: self.identifier.clone(),
         }
     }
 }
@@ -125,6 +128,7 @@ where B: BatchReader<K, V, T, R>, T: Clone+Default, TInner: Clone+Default {
     }
     fn len(&self) -> usize { self.batch.len() }
     fn description(&self) -> &Description<Product<T, TInner>> { &self.description }
+    fn identifier(&self) -> &BatchIdentifier { &self.identifier }
 }
 
 impl<K, V, T, R, B, TInner> BatchEnter<K, V, T, R, B, TInner> 
@@ -135,10 +139,12 @@ where B: BatchReader<K, V, T, R>, T: Clone, TInner: Clone+Default {
         let upper: Vec<_> = batch.description().upper().iter().map(|x| Product::new((*x).clone(), Default::default())).collect();
         let since: Vec<_> = batch.description().since().iter().map(|x| Product::new((*x).clone(), Default::default())).collect();
 
+        let identifier = batch.identifier().clone();
         BatchEnter {
             phantom: ::std::marker::PhantomData,
             batch: batch,
-            description: Description::new(&lower[..], &upper[..], &since[..])
+            description: Description::new(&lower[..], &upper[..], &since[..]),
+            identifier: identifier,
         }
     }
 }

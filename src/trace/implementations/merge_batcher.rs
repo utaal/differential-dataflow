@@ -42,7 +42,7 @@ where
     // which we call `lower`, by assumption that after sealing a batcher we receive no more 
     // updates with times not greater or equal to `upper`.
     #[inline(never)]
-    fn seal(&mut self, upper: &[T]) -> B {
+    fn seal(&mut self, upper: &[T], identifier: BatchIdentifier) -> B {
 
         let mut builder = B::Builder::new();
 
@@ -78,7 +78,7 @@ where
             self.sorter.push_list(kept);
         }
 
-        let seal = builder.done(&self.lower[..], &upper[..], &self.lower[..]);
+        let seal = builder.done(&self.lower[..], &upper[..], &self.lower[..], identifier);
         self.lower = upper.to_vec();
         seal
     }
@@ -91,6 +91,7 @@ where
 
 
 use std::slice::{from_raw_parts};
+use trace::BatchIdentifier;
 
 pub struct VecQueue<T> {
     list: Vec<T>,

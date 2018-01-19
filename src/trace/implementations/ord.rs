@@ -28,6 +28,7 @@ use super::spine::Spine;
 use super::merge_batcher::MergeBatcher;
 
 use abomonation::abomonated::Abomonated;
+use trace::BatchIdentifier;
 
 /// A trace implementation using a spine of ordered lists.
 pub type OrdValSpine<K, V, T, R> = OrdValSpineRc<K, V, T, R>;
@@ -57,6 +58,8 @@ pub struct OrdValBatch<K: Ord, V: Ord, T: Lattice, R> {
 	pub layer: OrderedLayer<K, OrderedLayer<V, OrderedLeaf<T, R>>>,
 	/// Description of the update times this layer represents.
 	pub desc: Description<T>,
+	/// Iderntifier for the batch
+	pub identifier: BatchIdentifier,
 }
 
 impl<K, V, T, R> BatchReader<K, V, T, R> for OrdValBatch<K, V, T, R>
@@ -65,6 +68,7 @@ where K: Ord+Clone+'static, V: Ord+Clone+'static, T: Lattice+Ord+Clone+'static, 
 	fn cursor(&self) -> Self::Cursor { OrdValCursor { cursor: self.layer.cursor() } }
 	fn len(&self) -> usize { <OrderedLayer<K, OrderedLayer<V, OrderedLeaf<T, R>>> as Trie>::tuples(&self.layer) }
 	fn description(&self) -> &Description<T> { &self.desc }
+	fn identifier(&self) -> &BatchIdentifier { &self.identifier }
 }
 
 impl<K, V, T, R> Batch<K, V, T, R> for OrdValBatch<K, V, T, R>
@@ -88,6 +92,7 @@ where K: Ord+Clone+'static, V: Ord+Clone+'static, T: Lattice+Ord+Clone+::std::fm
 		OrdValBatch {
 			layer: <OrderedLayer<K, OrderedLayer<V, OrderedLeaf<T, R>>> as Trie>::merge(&self.layer, &other.layer),  //self.layer.merge(&other.layer),
 			desc: Description::new(self.desc.lower(), other.desc.upper(), since),
+            identifier: self.identifier().clone()
 		}
 	}
 	fn begin_merge(&self, other: &Self) -> Self::Merger {
@@ -319,6 +324,7 @@ pub struct OrdValMerger<K: Ord+Clone+'static, V: Ord+Clone+'static, T: Lattice+O
 	// result that we are currently assembling.
 	result: <OrderedLayer<K, OrderedLayer<V, OrderedLeaf<T, R>>> as Trie>::MergeBuilder,
 	description: Description<T>,
+	identifier: BatchIdentifier,
 }
 
 impl<K, V, T, R> OrdValMerger<K, V, T, R>
@@ -345,6 +351,7 @@ where K: Ord+Clone+'static, V: Ord+Clone+'static, T: Lattice+Ord+Clone+::std::fm
 			upper2: batch2.layer.keys(),
 			result: <<OrderedLayer<K, OrderedLayer<V, OrderedLeaf<T, R>>> as Trie>::MergeBuilder as MergeBuilder>::with_capacity(&batch1.layer, &batch2.layer),
 			description: description,
+			identifier: batch1.identifier().clone(),
 		}
 	}
 }
@@ -359,6 +366,7 @@ where K: Ord+Clone+'static, V: Ord+Clone+'static, T: Lattice+Ord+Clone+::std::fm
 		OrdValBatch {
 			layer: self.result.done(),
 			desc: self.description,
+			identifier: self.identifier,
 		}
 	}
 	fn work(&mut self, source1: &OrdValBatch<K,V,T,R>, source2: &OrdValBatch<K,V,T,R>, frontier: &Option<Vec<T>>, fuel: &mut usize) {
@@ -448,10 +456,11 @@ where K: Ord+Clone+'static, V: Ord+Clone+'static, T: Lattice+Ord+Clone+::std::fm
 	}
 
 	#[inline(never)]
-	fn done(self, lower: &[T], upper: &[T], since: &[T]) -> OrdValBatch<K, V, T, R> {
+	fn done(self, lower: &[T], upper: &[T], since: &[T], identifier: BatchIdentifier) -> OrdValBatch<K, V, T, R> {
 		OrdValBatch {
 			layer: self.builder.done(),
-			desc: Description::new(lower, upper, since)
+			desc: Description::new(lower, upper, since),
+			identifier: identifier,
 		}
 	}
 }
@@ -466,6 +475,8 @@ pub struct OrdKeyBatch<K: Ord, T: Lattice, R> {
 	pub layer: OrderedLayer<K, OrderedLeaf<T, R>>,
 	/// Description of the update times this layer represents.
 	pub desc: Description<T>,
+	/// Batch identifier
+	pub identifier: BatchIdentifier,
 }
 
 impl<K, T, R> BatchReader<K, (), T, R> for OrdKeyBatch<K, T, R>
@@ -480,6 +491,7 @@ where K: Ord+Clone+'static, T: Lattice+Ord+Clone+'static, R: Diff {
 	}
 	fn len(&self) -> usize { <OrderedLayer<K, OrderedLeaf<T, R>> as Trie>::tuples(&self.layer) }
 	fn description(&self) -> &Description<T> { &self.desc }
+	fn identifier(&self) -> &BatchIdentifier { &self.identifier }
 }
 
 impl<K, T, R> Batch<K, (), T, R> for OrdKeyBatch<K, T, R>
@@ -503,6 +515,7 @@ where K: Ord+Clone+'static, T: Lattice+Ord+Clone+'static, R: Diff {
 		OrdKeyBatch {
 			layer: <OrderedLayer<K, OrderedLeaf<T, R>> as Trie>::merge(&self.layer, &other.layer),
 			desc: Description::new(self.desc.lower(), other.desc.upper(), since),
+			identifier: self.identifier().clone(),
 		}
 	}
 	fn begin_merge(&self, other: &Self) -> Self::Merger {
@@ -678,6 +691,7 @@ pub struct OrdKeyMerger<K: Ord+Clone+'static, T: Lattice+Ord+Clone+'static, R: D
 	// result that we are currently assembling.
 	result: <OrderedLayer<K, OrderedLeaf<T, R>> as Trie>::MergeBuilder,
 	description: Description<T>,
+	identifier: BatchIdentifier,
 }
 
 impl<K, T, R> OrdKeyMerger<K, T, R>
@@ -702,6 +716,7 @@ where K: Ord+Clone+'static, T: Lattice+Ord+Clone+'static, R: Diff {
 			upper2: batch2.layer.keys(),
 			result: <<OrderedLayer<K, OrderedLeaf<T, R>> as Trie>::MergeBuilder as MergeBuilder>::with_capacity(&batch1.layer, &batch2.layer),
 			description: description,
+			identifier: batch1.identifier().clone(),
 		}
 	}
 }
@@ -716,6 +731,7 @@ where K: Ord+Clone+'static, T: Lattice+Ord+Clone+'static, R: Diff {
 		OrdKeyBatch {
 			layer: self.result.done(),
 			desc: self.description,
+			identifier: self.identifier,
 		}
 	}
 	fn work(&mut self, source1: &OrdKeyBatch<K,T,R>, source2: &OrdKeyBatch<K,T,R>, frontier: &Option<Vec<T>>, fuel: &mut usize) {
@@ -807,10 +823,11 @@ where K: Ord+Clone+'static, T: Lattice+Ord+Clone+'static, R: Diff {
 	}
 
 	#[inline(never)]
-	fn done(self, lower: &[T], upper: &[T], since: &[T]) -> OrdKeyBatch<K, T, R> {
+	fn done(self, lower: &[T], upper: &[T], since: &[T], identifier: BatchIdentifier) -> OrdKeyBatch<K, T, R> {
 		OrdKeyBatch {
 			layer: self.builder.done(),
-			desc: Description::new(lower, upper, since)
+			desc: Description::new(lower, upper, since),
+			identifier: identifier,
 		}
 	}
 }

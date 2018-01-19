@@ -130,6 +130,26 @@ pub trait Trace<Key, Val, Time, R> : TraceReader<Key, Val, Time, R> where <Self 
 	fn insert(&mut self, batch: Self::Batch);
 }
 
+#[derive(Clone, Debug, Abomonation)]
+/// An identifier for the batch
+pub struct BatchIdentifier {
+    address: Vec<usize>,
+}
+
+impl BatchIdentifier {
+	/// Make a new BatchIdentifier from an operator address
+    pub fn new(address: Vec<usize>) -> Self {
+        BatchIdentifier {
+			address: address
+		}
+	}
+
+	/// Address of the operator that owns this batch
+    fn address(&self) -> &[usize] {
+        &self.address
+	}
+}
+
 /// A batch of updates whose contents may be read.
 ///
 /// This is a restricted interface to batches of updates, which support the reading of the batch's contents,
@@ -146,6 +166,8 @@ pub trait BatchReader<K, V, T, R> where Self: ::std::marker::Sized
 	fn len(&self) -> usize;
 	/// Describes the times of the updates in the batch.
 	fn description(&self) -> &Description<T>;
+	/// Batch identifier
+	fn identifier(&self) -> &BatchIdentifier;
 
 	/// All times in the batch are greater or equal to an element of `lower`.
 	fn lower(&self) -> &[T] { self.description().lower() }
@@ -199,7 +221,7 @@ pub trait Batch<K, V, T, R> : BatchReader<K, V, T, R> where Self: ::std::marker:
 			cursor.step_key(self);
 		}
 
-		builder.done(self.description().lower(), self.description().upper(), frontier)
+		builder.done(self.description().lower(), self.description().upper(), frontier, self.identifier().clone())
 	}
 	/// Advance times to `frontier` updating this batch.
 	///
@@ -220,7 +242,7 @@ pub trait Batcher<K, V, T, R, Output: Batch<K, V, T, R>> {
 	/// Adds an unordered batch of elements to the batcher.
 	fn push_batch(&mut self, batch: &mut Vec<((K, V), T, R)>);
 	/// Returns all updates not greater or equal to an element of `upper`.
-	fn seal(&mut self, upper: &[T]) -> Output;
+	fn seal(&mut self, upper: &[T], identifer: BatchIdentifier) -> Output;
 	/// Returns the lower envelope of contained update times.
 	fn frontier(&mut self) -> &[T];
 }
@@ -238,7 +260,7 @@ pub trait Builder<K, V, T, R, Output: Batch<K, V, T, R>> {
 		for item in iter { self.push(item); }
 	}
 	/// Completes building and returns the batch.
-	fn done(self, lower: &[T], upper: &[T], since: &[T]) -> Output;
+	fn done(self, lower: &[T], upper: &[T], since: &[T], identifer: BatchIdentifier) -> Output;
 }
 
 /// Represents a merge in progress.
@@ -265,6 +287,7 @@ pub mod rc_blanket_impls {
 	use ::Diff;
 	use ::lattice::Lattice;
 	use super::{Batch, BatchReader, Batcher, Builder, Merger, Cursor, Description};
+	use trace::BatchIdentifier;
 
 	impl<K, V, T, R, B: BatchReader<K,V,T,R>> BatchReader<K,V,T,R> for Rc<B> {
 
@@ -279,6 +302,7 @@ pub mod rc_blanket_impls {
 		fn len(&self) -> usize { (&**self).len() }
 		/// Describes the times of the updates in the batch.
 		fn description(&self) -> &Description<T> { (&**self).description() }
+		fn identifier(&self) -> &BatchIdentifier { (&**self).identifier() }
 	}
 
 	/// Wrapper to provide cursor to nested scope.
@@ -354,7 +378,7 @@ pub mod rc_blanket_impls {
 	impl<K,V,T,R,B:Batch<K,V,T,R>> Batcher<K, V, T, R, Rc<B>> for RcBatcher<K,V,T,R,B> {
 		fn new() -> Self { RcBatcher { batcher: <B::Batcher as Batcher<K,V,T,R,B>>::new() } }
 		fn push_batch(&mut self, batch: &mut Vec<((K, V), T, R)>) { self.batcher.push_batch(batch) }
-		fn seal(&mut self, upper: &[T]) -> Rc<B> { Rc::new(self.batcher.seal(upper)) }
+		fn seal(&mut self, upper: &[T], identifier: BatchIdentifier) -> Rc<B> { Rc::new(self.batcher.seal(upper, identifier)) }
 		fn frontier(&mut self) -> &[T] { self.batcher.frontier() }
 	}
 
@@ -366,7 +390,7 @@ pub mod rc_blanket_impls {
 		fn new() -> Self { RcBuilder { builder: <B::Builder as Builder<K,V,T,R,B>>::new() } }
 		fn with_capacity(cap: usize) -> Self { RcBuilder { builder: <B::Builder as Builder<K,V,T,R,B>>::with_capacity(cap) } }
 		fn push(&mut self, element: (K, V, T, R)) { self.builder.push(element) }
-		fn done(self, lower: &[T], upper: &[T], since: &[T]) -> Rc<B> { Rc::new(self.builder.done(lower, upper, since)) }
+		fn done(self, lower: &[T], upper: &[T], since: &[T], identifier: BatchIdentifier) -> Rc<B> { Rc::new(self.builder.done(lower, upper, since, identifier)) }
 	}
 
 	/// Wrapper type for merging reference counted batches.
@@ -394,6 +418,7 @@ pub mod abomonated_blanket_impls {
 	use abomonation::abomonated::Abomonated;
 
 	use super::{Batch, BatchReader, Batcher, Builder, Merger, Cursor, Description};
+	use trace::BatchIdentifier;
 
 	/// Methods to size and populate a byte slice.
 	pub trait SizedDerefMut : DerefMut<Target=[u8]> {
@@ -410,7 +435,7 @@ pub mod abomonated_blanket_impls {
 	impl SizedDerefMut for MmapMut {
 		fn allocate_for<K,V,T,R,B: BatchReader<K,V,T,R>+Abomonation>(batch: &B) -> Self {
 			let time = ::std::time::Instant::now();
-			let filename = format!("durability/{:?}", time);
+			let filename = format!("durability/{:?}-{:?}", batch.identifier(), time);
 			let file = ::std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(filename).expect("failed to open file");
 			file.set_len(measure(batch) as u64).expect("failed to set length");
 
@@ -431,6 +456,7 @@ pub mod abomonated_blanket_impls {
 		fn len(&self) -> usize { (&**self).len() }
 		/// Describes the times of the updates in the batch.
 		fn description(&self) -> &Description<T> { (&**self).description() }
+		fn identifier(&self) -> &BatchIdentifier { (&**self).identifier() }
 	}
 
 	/// Wrapper to provide cursor to nested scope.
@@ -497,8 +523,8 @@ pub mod abomonated_blanket_impls {
 	impl<K,V,T,R,B:Batch<K,V,T,R>+Abomonation, S:SizedDerefMut> Batcher<K, V, T, R, Abomonated<B,S>> for AbomonatedBatcher<K,V,T,R,B> {
 		fn new() -> Self { AbomonatedBatcher { batcher: <B::Batcher as Batcher<K,V,T,R,B>>::new() } }
 		fn push_batch(&mut self, batch: &mut Vec<((K, V), T, R)>) { self.batcher.push_batch(batch) }
-		fn seal(&mut self, upper: &[T]) -> Abomonated<B, S> { 
-			let batch = self.batcher.seal(upper);
+		fn seal(&mut self, upper: &[T], identifier: BatchIdentifier) -> Abomonated<B, S> {
+			let batch = self.batcher.seal(upper, identifier);
 			let mut bytes = S::allocate_for(&batch);//Vec::with_capacity(measure(&batch));
 			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }
@@ -514,8 +540,8 @@ pub mod abomonated_blanket_impls {
 		fn new() -> Self { AbomonatedBuilder { builder: <B::Builder as Builder<K,V,T,R,B>>::new() } }
 		fn with_capacity(cap: usize) -> Self { AbomonatedBuilder { builder: <B::Builder as Builder<K,V,T,R,B>>::with_capacity(cap) } }
 		fn push(&mut self, element: (K, V, T, R)) { self.builder.push(element) }
-		fn done(self, lower: &[T], upper: &[T], since: &[T]) -> Abomonated<B, S> { 
-			let batch = self.builder.done(lower, upper, since);
+		fn done(self, lower: &[T], upper: &[T], since: &[T], identifier: BatchIdentifier) -> Abomonated<B, S> {
+			let batch = self.builder.done(lower, upper, since, identifier);
 			let mut bytes = S::allocate_for(&batch);//Vec::with_capacity(measure(&batch));
 			unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
 			unsafe { Abomonated::<B,_>::new(bytes).unwrap() }

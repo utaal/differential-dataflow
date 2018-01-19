@@ -8,6 +8,7 @@ use hashable::HashOrdered;
 
 use lattice::Lattice;
 use trace::{Batch, Batcher, Builder};
+use trace::BatchIdentifier;
 
 /// Creates batches from unordered tuples.
 pub struct RadixBatcher<K: HashOrdered, V, T: PartialOrd, R: Diff, B: Batch<K, V, T, R>> {
@@ -128,7 +129,7 @@ where
     // which we call `lower`, by assumption that after sealing a batcher we receive no more 
     // updates with times not greater or equal to `upper`.
     #[inline(never)]
-    fn seal(&mut self, upper: &[T]) -> B {
+    fn seal(&mut self, upper: &[T], identifier: BatchIdentifier) -> B {
 
         // TODO: We filter and then consolidate; we could consolidate and then filter, for general
         //       health of compact state. Would mean that repeated `seal` calls wouldn't have to 
@@ -163,7 +164,7 @@ where
         self.sorter.rebalance(&mut to_seal, 256);
 
         // Return the finished layer with its bounds.
-        let result = builder.done(&self.lower[..], upper, &self.lower[..]);
+        let result = builder.done(&self.lower[..], upper, &self.lower[..], identifier);
         self.lower = upper.to_vec();
         result
     }

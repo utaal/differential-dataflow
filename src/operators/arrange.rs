@@ -45,6 +45,7 @@ use trace::implementations::ord::OrdKeySpine as DefaultKeyTrace;
 
 use trace::wrappers::enter::{TraceEnter, BatchEnter};
 use trace::wrappers::rc::TraceBox;
+use trace::BatchIdentifier;
 
 /// Wrapper type to permit transfer of `Rc` types, as in batch.
 ///
@@ -551,6 +552,8 @@ where
         // Capabilities for the lower envelope of updates in `batcher`.
         let mut capabilities = Antichain::<Capability<G::Timestamp>>::new();
 
+        let addr = self.scope().addr();
+
         // fabricate a data-parallel operator using the `unary_notify` pattern.
         let exchange = Exchange::new(move |update: &((K,V),G::Timestamp,R)| (update.0).0.hashed().as_u64());
         let stream = self.inner.unary_frontier(exchange, "Arrange", move |_capability, _info|
@@ -592,7 +595,7 @@ where
                         }
 
                         // Extract updates not in advance of `upper`.
-                        let batch = batcher.seal(upper.elements());
+                        let batch = batcher.seal(upper.elements(), BatchIdentifier::new(addr.clone()));
 
                         writer.seal(upper.elements(), Some((capability.time().clone(), batch.clone())));
 

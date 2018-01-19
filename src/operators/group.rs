@@ -34,6 +34,7 @@ use trace::cursor::cursor_list::CursorList;
 use trace::implementations::ord::OrdValSpine as DefaultValTrace;
 use trace::implementations::ord::OrdKeySpine as DefaultKeyTrace;
 
+use trace::BatchIdentifier;
 use trace::TraceReader;
 
 /// Extension trait for the `group` differential dataflow method.
@@ -279,6 +280,7 @@ where
         let mut lower_issued = Antichain::from_elem(<G::Timestamp as Lattice>::minimum());
 
         let id = self.stream.scope().index();
+        let addr = self.stream.scope().addr();
 
         // fabricate a data-parallel operator using the `unary_notify` pattern.
         let stream = self.stream.unary_notify(Pipeline, "Group", Vec::new(), move |input, output, notificator| {
@@ -465,7 +467,7 @@ where
 
                     if lower_issued.elements() != local_upper.elements() {
 
-                        let batch = builder.done(lower_issued.elements(), local_upper.elements(), lower_issued.elements());
+                        let batch = builder.done(lower_issued.elements(), local_upper.elements(), lower_issued.elements(), BatchIdentifier::new(addr.clone()));
 
                         // ship batch to the output, and commit to the output trace.
                         output.session(&capabilities[index]).give(BatchWrapper { item: batch.clone() });
