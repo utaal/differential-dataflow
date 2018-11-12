@@ -298,6 +298,8 @@ where
                     register.get::<::logging::DifferentialEvent>("differential/arrange")
                 };
 
+                let batch_identifier = BatchIdentifier::new(addr.clone(), operator_info.local_id);
+
                 let empty = T2::new(operator_info, logger);
                 let mut source_trace = self.trace.clone();
 
@@ -330,6 +332,7 @@ where
                 let mut input_buffer = Vec::new();
 
                 let id = self.stream.scope().index();
+
 
                 move |input, output| {
 
@@ -516,7 +519,7 @@ where
 
                             if lower_issued.elements() != local_upper.elements() {
 
-                                let batch = builder.done(lower_issued.elements(), local_upper.elements(), lower_issued.elements());
+                                let batch = builder.done(lower_issued.elements(), local_upper.elements(), lower_issued.elements(), batch_identifier.clone());
 
                                 // ship batch to the output, and commit to the output trace.
                                 output.session(&capabilities[index]).give(batch.clone());
@@ -646,6 +649,8 @@ where
 
 /// Implementation based on replaying historical and new updates together.
 mod history_replay {
+
+    use std::fmt::Debug;
 
     use ::Diff;
     use lattice::Lattice;

@@ -670,8 +670,12 @@ where
                 // Capabilities for the lower envelope of updates in `batcher`.
                 let mut capabilities = Antichain::<Capability<G::Timestamp>>::new();
 
-                let trace_identifier = BatchIdentifier::new(addr.clone(), info.index());
+                let trace_identifier = BatchIdentifier::new(addr.clone(), info.local_id);
                 let recovered_batches = T::reconstitute(trace_identifier.clone());
+
+                let empty_trace = T::new(info, logger);
+                let (reader_local, mut writer) = TraceAgent::new(empty_trace);
+                *reader = Some(reader_local);
 
                 let (mut batcher, upper) = if let Some(b) = recovered_batches.last() {
                     let upper = b.upper().to_vec();
@@ -710,9 +714,6 @@ where
 
                 // ???
 
-                let empty_trace = T::new(_info, logger);
-                let (reader_local, mut writer) = TraceAgent::new(empty_trace);
-                *reader = Some(reader_local);
 
                 move |input, output| {
 
@@ -753,7 +754,7 @@ where
                             }
 
                             // Extract updates not in advance of `upper`.
-                            let batch = batcher.seal(upper.elements(), trace_identifier);
+                            let batch = batcher.seal(upper.elements(), trace_identifier.clone());
 
                         // ??? let mut new_upper = Antichain::new();
                         // ??? for time1 in upper.elements() {

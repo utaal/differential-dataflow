@@ -237,7 +237,8 @@ where
         if self.upper != Vec::new() {
             use trace::Builder;
             let builder = B::Builder::new();
-            let batch = builder.done(&self.upper[..], &[], &self.upper[..]);
+            // TODO fix identifier
+            let batch = builder.done(&self.upper[..], &[], &self.upper[..], ::trace::BatchIdentifier::new(vec![], 0));
             self.insert(batch);
         }
     }
@@ -451,3 +452,148 @@ where
         }
     }
 }
+
+// -- durability --
+
+use std::rc::Rc;
+use abomonation::Abomonation;
+use abomonation::abomonated::Abomonated;
+use trace::BatchIdentifier;
+use timely::order::PartialOrder;
+use trace::description::Description;
+use timely::progress::Antichain;
+
+
+/// Wrapper for durable traces
+pub struct Durable<K, V, T: Lattice+Ord+Clone, R: Diff, B: Batch<K, V, T, R>+Abomonation> {
+    trace: Spine<K, V, T, R, Rc<Abomonated<B, ::memmap::MmapMut>>>,
+    _phantom: ::std::marker::PhantomData<(K, V, T, R, B)>,
+}
+
+impl<K, V, T: Lattice + Ord + Clone, R: Diff, B: Batch<K, V, T, R> + Abomonation> Durable<K, V, T, R, B> {
+    /// Make a new Durable wrapper
+    pub fn new(trace: Spine<K, V, T, R, Rc<Abomonated<B, ::memmap::MmapMut>>>) -> Self {
+        Durable {
+            trace,
+            _phantom: ::std::marker::PhantomData,
+        }
+    }
+}
+
+impl<K, V, Time, R, B> TraceReader<K, V, Time, R> for Durable<K, V, Time, R, B>
+    where
+        K: Ord+Clone,
+        V: Ord+Clone,
+        Time: Lattice+Ord+Clone,
+        R: Diff,
+        B: Batch<K, V, Time, R>+Abomonation+'static,
+{
+    type Batch = Rc<Abomonated<B, ::memmap::MmapMut>>;
+    type Cursor = <Spine<K, V, Time, R, Rc<Abomonated<B, ::memmap::MmapMut>>> as TraceReader<K, V, Time, R>>::Cursor;
+
+    fn cursor_through(&mut self, upper: &[Time]) -> Option<(Self::Cursor, <Self::Cursor as Cursor<K, V, Time, R>>::Storage)> {
+        self.trace.cursor_through(upper)
+    }
+
+    fn advance_by(&mut self, frontier: &[Time]) {
+        self.trace.advance_by(frontier);
+    }
+
+    fn advance_frontier(&mut self) -> &[Time] {
+        self.trace.advance_frontier()
+    }
+
+    fn distinguish_since(&mut self, frontier: &[Time]) {
+        self.trace.distinguish_since(frontier);
+    }
+
+    fn distinguish_frontier(&mut self) -> &[Time] {
+        self.trace.distinguish_frontier()
+    }
+
+    fn map_batches<F: FnMut(&Self::Batch)>(&mut self, mut f: F) {
+        self.trace.map_batches(|x| f(x));
+    }
+}
+
+
+/// Returns true if every element of `other` is greater or equal to some element of `this`.
+// TODO refactor?
+pub fn dominates_other<T: PartialOrder>(this: &[T], other: &[T]) -> bool {
+    other.iter().all(|t2| this.iter().any(|t1| t1.less_equal(t2)))
+}
+
+fn optimal_viable<T: Lattice+Ord+Clone+Debug, X, I: DoubleEndedIterator<Item=(Description<T>, X)>>(batches: I, frontier: Antichain<T>) -> Vec<(Description<T>, X)> {
+    let viable = batches.filter(
+        |&(ref b, _)| b.since().iter().all(|x| !frontier.less_equal(x)));
+
+    let mut chosen: Vec<(Description<T>, X)> = Vec::new();
+    for (b, x) in viable.rev() {
+        if !chosen.iter().any(|&(ref c, _)|
+            dominates_other(c.lower(), b.lower()) && dominates_other(b.upper(), c.upper())) {
+
+            chosen.push((b, x));
+        }
+    }
+
+    chosen.reverse();
+    eprintln!("{:#?}", chosen.iter().map(|&(ref r, _)| r.clone()).collect::<Vec<_>>());
+    assert!(&chosen[..].windows(2).all(|d| d[0].0.upper() == d[1].0.lower()));
+    chosen
+}
+
+// fn antichain_from<T: Clone+PartialOrder>(items: &[T]) -> Antichain<T> {
+// 	let mut antichain: Antichain<T> = Antichain::new();
+// 	for i in items {
+// 		antichain.insert(i.clone());
+// 	}
+// 	antichain
+// }
+
+impl<K, V, T, R, B> Trace<K, V, T, R> for Durable<K, V, T, R, B>
+    where
+        K: Ord+Clone,
+        V: Ord+Clone,
+        T: Lattice+Ord+Clone+Debug,
+        R: Diff,
+        B: Batch<K, V, T, R>+Abomonation+'static,
+{
+    fn new(info: ::timely::dataflow::operators::generic::OperatorInfo, logging: Option<::logging::Logger>) -> Self {
+        Durable {
+            trace: Spine::<K, V, T, R, Rc<Abomonated<B, ::memmap::MmapMut>>>::new(info, logging),
+            _phantom: ::std::marker::PhantomData,
+        }
+    }
+
+    fn insert(&mut self, batch: Self::Batch) {
+        self.trace.insert(batch);
+    }
+
+    fn reconstitute(batch_identifier: BatchIdentifier) -> Vec<Self::Batch> {
+        let mut durable_files: Vec<_> = ::std::fs::read_dir("durability/").expect("no durability directory")
+            .map(|e| e.expect("cannot read file"))
+            .filter(|e| {
+                let name = e.file_name();
+                name.to_string_lossy().starts_with(batch_identifier.to_string().as_str())
+            }).collect();
+        durable_files.sort_by_key(|f: &::std::fs::DirEntry| f.file_name());
+        let reconstituted = durable_files.into_iter().map(|f| {
+            // unsafe { abomonation::encode(&batch, &mut bytes.deref_mut()).unwrap() };
+
+            let filename = f.path();
+            let name = filename.to_string_lossy();
+            let file = ::std::fs::OpenOptions::new().read(true).write(true).open(&filename).expect(&format!("failed to open file {}", &name));
+            let mapped = unsafe {
+                ::memmap::MmapMut::map_mut(&file).expect(&format!("cannot mmap {}", &name)) };
+            Rc::new(unsafe { Abomonated::<B,_>::new(mapped).unwrap() })
+        }).map(|x| (x.description().clone(), x));
+        let chosen = optimal_viable(reconstituted, Antichain::new());
+        chosen.into_iter().map(|(_, b)| b).collect()
+    }
+
+    fn close(&mut self) {
+        unimplemented!()
+    }
+}
+
+
