@@ -27,19 +27,30 @@ type Time = ();
 type Iter = u32;
 type Diff = isize;
 
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+enum Mode {
+    Vanilla,
+    Opt,
+    OptPlus,
+}
+
 fn main() {
     let mut args = std::env::args();
     let _ = args.next().unwrap();
-    let use_optimized: bool = args.next().expect("expected optimize").parse().expect("invalid optimize (bool)");
+    let mode: Mode = match args.next().expect("expected optimize").as_str() {
+        "vanilla" => Mode::Vanilla,
+        "opt" => Mode::Opt,
+        "optplus" => Mode::OptPlus,
+        _ => panic!("invalid optimize"),
+    };
     let filename: String = args.next().expect("expected filename");
     let zerocopy_workers: usize = args.next().expect("expected zerocopy_workers").parse().expect("invalid zerocopy_workers");
     let bind_cores: bool = args.next().expect("expected bind cores?").parse().expect("invalid bind cores?");
 
-    if use_optimized {
-        optimized(filename, zerocopy_workers, bind_cores);
-    }
-    else {
-        unoptimized(filename, zerocopy_workers, bind_cores);
+    match mode {
+        Mode::Vanilla => unoptimized(filename, zerocopy_workers, bind_cores),
+        Mode::Opt => optimized_no_sharing(filename, zerocopy_workers, bind_cores),
+        Mode::OptPlus => optimized(filename, zerocopy_workers, bind_cores),
     }
 }
 
