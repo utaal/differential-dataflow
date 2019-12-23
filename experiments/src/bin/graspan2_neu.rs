@@ -334,7 +334,7 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
 
         let timer = ::std::time::Instant::now();
 
-        let (mut a, mut d) = worker.dataflow::<(),_,_>(|scope| {
+        let (mut a, mut d) = worker.dataflow::<Time,_,_>(|scope| {
 
             // let timer = timer.clone();
 
@@ -346,7 +346,7 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
                 .flat_map(|(a,b)| vec![a,b])
                 .concat(&dereference.flat_map(|(a,b)| vec![a,b]));
 
-            let dereference = dereference.arrange::<OrdValSpine<_,_,_,_>>();
+            let dereference = dereference.arrange::<OrdValSpine<(Node,Node),_,_,isize>>();
 
             let (value_flow, memory_alias) =
             scope
@@ -359,8 +359,8 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
                     let value_flow = Variable::new(scope, Product::new(Default::default(), 1));
                     let memory_alias = Variable::new(scope, Product::new(Default::default(), 1));
 
-                    let value_flow_arranged = || { value_flow.arrange::<OrdValSpine<_,_,_,_>>() };
-                    let memory_alias_arranged = || { memory_alias.arrange::<OrdValSpine<_,_,_,_>>() };
+                    // let value_flow_arranged = || { value_flow.arrange::<OrdValSpine<_,_,_,_>>() };
+                    // let memory_alias_arranged = || { memory_alias.arrange::<OrdValSpine<_,_,_,_>>() };
 
                     // VF(a,a) <-
                     // VF(a,b) <- A(a,x),VF(x,b)
@@ -369,10 +369,10 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
                     assignment
                         .map(|(a,b)| (b,a))
                         .arrange::<OrdValSpine<_,_,_,_>>()
-                        .join_core(&memory_alias_arranged(), |_,&a,&b| Some((b,a)))
+                        .join_core(&(memory_alias.arrange::<OrdValSpine<_,_,_,_>>()), |_,&a,&b| Some((b,a)))
                         .concat(&assignment.map(|(a,b)| (b,a)))
                         .arrange::<OrdValSpine<_,_,_,_>>()
-                        .join_core(&value_flow_arranged(), |_,&a,&b| Some((a,b)))
+                        .join_core(&(value_flow.arrange::<OrdValSpine<_,_,_,_>>()), |_,&a,&b| Some((a,b)))
                         .concat(&nodes.map(|n| (n,n)))
                         .arrange::<OrdKeySpine<_,_,_>>()
                         // .distinct_total_core::<Diff>()
@@ -396,7 +396,7 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
                         .join_core(&value_flow_deref(), |_y,&a,&b| Some((a,b)));
 
                     let memory_alias_next =
-                    memory_alias_arranged()
+                    (memory_alias.arrange::<OrdValSpine<_,_,_,_>>())
                         .join_core(&value_flow_deref(), |_x,&y,&a| Some((y,a)))
                         .arrange::<OrdValSpine<_,_,_,_>>()
                         .join_core(&value_flow_deref(), |_y,&a,&b| Some((a,b)))

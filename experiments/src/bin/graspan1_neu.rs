@@ -87,8 +87,7 @@ fn main() {
         if index == 0 { println!("{:?}:\tDataflow assembled", timer.elapsed()); }
 
         // snag a filename to use for the input graph.
-        let filename = std::env::args().nth(1).unwrap();
-        let file = BufReader::new(File::open(filename).unwrap());
+        let file = BufReader::new(File::open(filename.clone()).unwrap());
         for readline in file.lines() {
             let line = readline.ok().expect("read error");
             if !line.starts_with('#') && line.len() > 0 {
@@ -112,7 +111,11 @@ fn main() {
         edges.close();
         while worker.step() { }
 
-        if index == 0 { println!("{:?}:\tComputation complete", timer.elapsed()); }
+        if index == 0 {
+            let elapsed = timer.elapsed();
+            println!("{:?}:\tComputation complete", elapsed);
+            println!("[result]\t{}\tms", elapsed.as_millis());
+        }
 
     }).unwrap();
 }
