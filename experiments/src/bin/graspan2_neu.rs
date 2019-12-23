@@ -334,7 +334,7 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
 
         let timer = ::std::time::Instant::now();
 
-        let (mut a, mut d) = worker.dataflow::<Time,_,_>(|scope| {
+        let (mut a, mut d) = worker.dataflow::<(),_,_>(|scope| {
 
             // let timer = timer.clone();
 
@@ -346,7 +346,7 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
                 .flat_map(|(a,b)| vec![a,b])
                 .concat(&dereference.flat_map(|(a,b)| vec![a,b]));
 
-            let dereference = dereference.arrange::<OrdValSpine<(Node,Node),_,_,isize>>();
+            let dereference = dereference.arrange::<OrdValSpine<_,_,_,_>>();
 
             let (value_flow, memory_alias) =
             scope
@@ -359,53 +359,57 @@ fn optimized_no_sharing(filename: String, zerocopy_workers: usize, bind_cores: b
                     let value_flow = Variable::new(scope, Product::new(Default::default(), 1));
                     let memory_alias = Variable::new(scope, Product::new(Default::default(), 1));
 
-                    // let value_flow_arranged = || { value_flow.arrange::<OrdValSpine<_,_,_,_>>() };
-                    // let memory_alias_arranged = || { memory_alias.arrange::<OrdValSpine<_,_,_,_>>() };
+                    let (value_flow_next, memory_alias_next) = {
+                        let value_flow_arranged = || { value_flow.arrange::<OrdValSpine<_,_,_,_>>() };
+                        let memory_alias_arranged = || { memory_alias.arrange::<OrdValSpine<_,_,_,_>>() };
 
-                    // VF(a,a) <-
-                    // VF(a,b) <- A(a,x),VF(x,b)
-                    // VF(a,b) <- A(a,x),MA(x,y),VF(y,b)
-                    let value_flow_next =
-                    assignment
-                        .map(|(a,b)| (b,a))
-                        .arrange::<OrdValSpine<_,_,_,_>>()
-                        .join_core(&(memory_alias.arrange::<OrdValSpine<_,_,_,_>>()), |_,&a,&b| Some((b,a)))
-                        .concat(&assignment.map(|(a,b)| (b,a)))
-                        .arrange::<OrdValSpine<_,_,_,_>>()
-                        .join_core(&(value_flow.arrange::<OrdValSpine<_,_,_,_>>()), |_,&a,&b| Some((a,b)))
-                        .concat(&nodes.map(|n| (n,n)))
-                        .arrange::<OrdKeySpine<_,_,_>>()
-                        // .distinct_total_core::<Diff>()
-                        .distinct_total();
-                        //.threshold_semigroup(|_,_,x| if x.is_none() { Some(Present) } else { None });
-                        // ;
+                        // VF(a,a) <-
+                        // VF(a,b) <- A(a,x),VF(x,b)
+                        // VF(a,b) <- A(a,x),MA(x,y),VF(y,b)
+                        let value_flow_next =
+                        assignment
+                            .map(|(a,b)| (b,a))
+                            .arrange::<OrdValSpine<_,_,_,_>>()
+                            .join_core(&memory_alias_arranged(), |_,&a,&b| Some((b,a)))
+                            .concat(&assignment.map(|(a,b)| (b,a)))
+                            .arrange::<OrdValSpine<_,_,_,_>>()
+                            .join_core(&value_flow_arranged(), |_,&a,&b| Some((a,b)))
+                            .concat(&nodes.map(|n| (n,n)))
+                            .arrange::<OrdKeySpine<_,_,_>>()
+                            // .distinct_total_core::<Diff>()
+                            .distinct_total();
+                            //.threshold_semigroup(|_,_,x| if x.is_none() { Some(Present) } else { None });
+                            // ;
 
-                    // VFD(a,b) <- VF(a,x),D(x,b)
-                    let value_flow_deref_join =
-                    value_flow
-                        .map(|(a,b)| (b,a))
-                        .arrange::<OrdValSpine<_,_,_,_>>()
-                        .join_core(&dereference, |_x,&a,&b| Some((a,b)));
+                        // VFD(a,b) <- VF(a,x),D(x,b)
+                        let value_flow_deref_join =
+                        value_flow
+                            .map(|(a,b)| (b,a))
+                            .arrange::<OrdValSpine<_,_,_,_>>()
+                            .join_core(&dereference, |_x,&a,&b| Some((a,b)));
 
-                    let value_flow_deref = || { value_flow_deref_join.arrange::<OrdValSpine<_,_,_,_>>() };
+                        let value_flow_deref = || { value_flow_deref_join.arrange::<OrdValSpine<_,_,_,_>>() };
 
-                    // MA(a,b) <- VFD(x,a),VFD(y,b)
-                    // MA(a,b) <- VFD(x,a),MA(x,y),VFD(y,b)
-                    let memory_alias_next =
-                    value_flow_deref()
-                        .join_core(&value_flow_deref(), |_y,&a,&b| Some((a,b)));
+                        // MA(a,b) <- VFD(x,a),VFD(y,b)
+                        // MA(a,b) <- VFD(x,a),MA(x,y),VFD(y,b)
+                        let memory_alias_next =
+                        value_flow_deref()
+                            .join_core(&value_flow_deref(), |_y,&a,&b| Some((a,b)));
 
-                    let memory_alias_next =
-                    (memory_alias.arrange::<OrdValSpine<_,_,_,_>>())
-                        .join_core(&value_flow_deref(), |_x,&y,&a| Some((y,a)))
-                        .arrange::<OrdValSpine<_,_,_,_>>()
-                        .join_core(&value_flow_deref(), |_y,&a,&b| Some((a,b)))
-                        .concat(&memory_alias_next)
-                        .arrange::<OrdKeySpine<_,_,_>>()
-                        .distinct_total();
-                        // .distinct_total_core::<Diff>()
-                        //.threshold_semigroup(|_,_,x| if x.is_none() { Some(Present) } else { None });
-                        //;
+                        let memory_alias_next =
+                        memory_alias_arranged()
+                            .join_core(&value_flow_deref(), |_x,&y,&a| Some((y,a)))
+                            .arrange::<OrdValSpine<_,_,_,_>>()
+                            .join_core(&value_flow_deref(), |_y,&a,&b| Some((a,b)))
+                            .concat(&memory_alias_next)
+                            .arrange::<OrdKeySpine<_,_,_>>()
+                            .distinct_total();
+                            // .distinct_total_core::<Diff>()
+                            //.threshold_semigroup(|_,_,x| if x.is_none() { Some(Present) } else { None });
+                            //;
+                            //
+                        (value_flow_next, memory_alias_next)
+                    };
 
                     value_flow.set(&value_flow_next);
                     memory_alias.set(&memory_alias_next);
